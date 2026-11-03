@@ -1,4 +1,4 @@
 /* Paints before any script runs, so the first frame of a page load isn't white. */
-html:not([data-espn-dark="off"]) {
+html:not([data-fantasy-dark="off"]) {
   background-color: #121314 !important;
 }

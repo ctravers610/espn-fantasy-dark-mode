@@ -1,9 +1,9 @@
-// Maps ESPN's light colors to dark ones. A color's job decides how it moves: a
+// Maps a site's light colors to dark ones. A color's job decides how it moves: a
 // white background darkens while a white label stays white, so each job gets its
 // own function. Colors that already work on dark (brand blues, team colors) pass
 // through untouched.
 
-globalThis.EspnDarkColors = (() => {
+globalThis.FantasyDarkColors = (() => {
   const NAMED = {
     white: [255, 255, 255],
     black: [0, 0, 0],
