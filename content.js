@@ -1,11 +1,11 @@
-// ESPN hard-codes its colors and generates hashed class names, and its own dark
-// theme classes change next to nothing, so a hand-written stylesheet would miss most of
-// the page. Instead this reads every rule the page has loaded and writes a second
-// stylesheet with the same selectors and dark colors. Hover states and media
+// ESPN and Yahoo hard-code their colors and generate hashed class names, and their
+// own dark theme classes change next to nothing, so a hand-written stylesheet would
+// miss most of the page. Instead this reads every rule the page has loaded and writes
+// a second stylesheet with the same selectors and dark colors. Hover states and media
 // queries keep working because the selectors are the page's own.
 
 (() => {
-  const { mapValue } = globalThis.EspnDarkColors;
+  const { mapValue } = globalThis.FantasyDarkColors;
 
   const ROLES = {
     color: 'text',
@@ -47,13 +47,23 @@
     ::selection { background-color: #305bc8; color: #fff; }
   `;
 
-  const FLAG = 'data-espn-dark';
+  const FLAG = 'data-fantasy-dark';
+  // Each site has its own stylesheets, so each keeps its own cached result.
+  const CACHE_KEY = `cachedCss:${location.hostname}`;
   const styleEl = document.createElement('style');
-  styleEl.id = 'espn-dark-mode';
+  styleEl.id = 'fantasy-dark-mode';
+
+  // Yahoo ships a full dark palette for its color tokens but never turns it on, so
+  // there these attributes do that work and only hard-coded colors get rewritten.
+  const NATIVE_DARK = location.hostname.endsWith('.yahoo.com');
+  const SCHEME = 'data-color-scheme';
+  const THEME_ENABLED = 'data-color-theme-enabled';
+  const LIGHT_SCHEMES = `[${SCHEME}="light"], [${SCHEME}="auto"]`;
 
   const localSheets = new WeakMap(); // sheet -> { ruleCount, css }
   const remoteSheets = new Map(); // href -> css, empty until its fetch returns
   const inlineOriginals = new WeakMap(); // element -> { property: { original, priority, mapped } }
+  const schemeOriginals = new WeakMap(); // element -> its scheme attribute before we changed it
 
   let enabled = false;
   let observer = null;
@@ -85,8 +95,8 @@
       if (!value) continue;
       let converted = null;
       if (name.startsWith('--')) {
-        // ESPN's own dark theme blocks already hold dark values.
-        const role = /dark/i.test(selector) || value.includes('url(') ? null : customPropertyRole(name);
+        // A site's own dark theme blocks already hold dark values.
+        const role = NATIVE_DARK || /dark/i.test(selector) || value.includes('url(') ? null : customPropertyRole(name);
         if (role) converted = mapValue(value, role);
       } else if (ROLES[name]) {
         // Unchanged values go in too: with every rule here !important, leaving one
@@ -112,7 +122,7 @@
         if (declarations) css += `${rule.selectorText}{${declarations}}\n`;
       } else if (rule.conditionText !== undefined && rule.conditionText !== 'print') {
         const inner = convertRules(rule.cssRules);
-        const atRule = rule.media ? '@media' : '@supports';
+        const atRule = rule.media ? '@media' : rule.containerQuery !== undefined ? '@container' : '@supports';
         if (inner) css += `${atRule} ${rule.conditionText}{\n${inner}}\n`;
       }
     }
@@ -169,7 +179,7 @@
     if (styleEl.textContent === css) return;
     styleEl.textContent = css;
     clearTimeout(cacheTimer);
-    cacheTimer = setTimeout(() => chrome.storage.local.set({ cachedCss: generated }), 3000);
+    cacheTimer = setTimeout(() => chrome.storage.local.set({ [CACHE_KEY]: generated }), 3000);
   }
 
   function scheduleRefresh() {
@@ -206,6 +216,22 @@
     }
   }
 
+  function applyScheme(element) {
+    schemeOriginals.set(element, element.getAttribute(SCHEME));
+    element.setAttribute(SCHEME, 'dark');
+  }
+
+  function restoreSchemes() {
+    document.documentElement.removeAttribute(THEME_ENABLED);
+    for (const element of document.querySelectorAll(`[${SCHEME}="dark"]`)) {
+      if (!schemeOriginals.has(element)) continue;
+      const original = schemeOriginals.get(element);
+      if (original === null) element.removeAttribute(SCHEME);
+      else element.setAttribute(SCHEME, original);
+      schemeOriginals.delete(element);
+    }
+  }
+
   function flushInline() {
     inlineFrame = null;
     const elements = pendingInline;
@@ -213,6 +239,9 @@
     for (const element of elements) {
       applyInline(element);
       for (const child of element.querySelectorAll('[style]')) applyInline(child);
+      if (!NATIVE_DARK) continue;
+      if (element.matches(LIGHT_SCHEMES)) applyScheme(element);
+      for (const child of element.querySelectorAll(LIGHT_SCHEMES)) applyScheme(child);
     }
   }
 
@@ -234,12 +263,16 @@
     // Last visit's result, so colors are right before the fresh pass finishes.
     if (cachedCss && !styleEl.textContent) styleEl.textContent = cachedCss + BASE_CSS;
     document.documentElement.append(styleEl);
+    if (NATIVE_DARK) {
+      document.documentElement.setAttribute(THEME_ENABLED, '');
+      applyScheme(document.documentElement);
+    }
     observer = new MutationObserver(onMutations);
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['style'],
+      attributeFilter: ['style', SCHEME],
     });
     pendingInline.add(document.documentElement);
     inlineFrame ??= requestAnimationFrame(flushInline);
@@ -257,6 +290,7 @@
     pendingInline.clear();
     styleEl.remove();
     restoreInline();
+    if (NATIVE_DARK) restoreSchemes();
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -265,7 +299,7 @@
     else enable();
   });
 
-  chrome.storage.local.get(['enabled', 'cachedCss']).then(({ enabled: wanted = true, cachedCss }) => {
+  chrome.storage.local.get(['enabled', CACHE_KEY]).then(({ enabled: wanted = true, [CACHE_KEY]: cachedCss }) => {
     if (wanted) enable(cachedCss);
     else document.documentElement.setAttribute(FLAG, 'off');
   });

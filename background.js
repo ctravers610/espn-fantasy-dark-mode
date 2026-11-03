@@ -1,5 +1,5 @@
-// Toolbar toggle, plus fetching stylesheets for the content script: ESPN serves
-// its CSS from a CDN without CORS headers, so only this worker can read it.
+// Toolbar toggle, plus fetching stylesheets for the content script: ESPN and Yahoo
+// serve their CSS from CDNs without CORS headers, so only this worker can read it.
 
 async function syncBadge() {
   const { enabled = true } = await chrome.storage.local.get('enabled');
@@ -7,7 +7,11 @@ async function syncBadge() {
   await chrome.action.setBadgeText({ text: enabled ? 'ON' : '' });
 }
 
-chrome.runtime.onInstalled.addListener(syncBadge);
+chrome.runtime.onInstalled.addListener(() => {
+  // The cache was one key before each site got its own.
+  chrome.storage.local.remove('cachedCss');
+  syncBadge();
+});
 chrome.runtime.onStartup.addListener(syncBadge);
 
 chrome.action.onClicked.addListener(async () => {
